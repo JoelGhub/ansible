@@ -1,3 +1,22 @@
+## Diagrama básico de funcionamiento (ASCII)
+
+```
+	   +-------------------+
+	   |  Controlador      |
+	   |  (Ansible)        |
+	   +-------------------+
+			   |
+	   +---------+---------+
+	   |         |         |
+   SSH  |     SSH |     SSH |
+	   v         v         v
+ +-----------+ +-----------+ +-----------+
+ | Nodo 1    | | Nodo 2    | | Nodo 3    |
+ | (Servidor)| | (Servidor)| | (Servidor)|
+ +-----------+ +-----------+ +-----------+
+```
+
+El controlador Ansible se conecta por SSH a los nodos gestionados para aplicar configuraciones y tareas.
 # 1. Introducción a Ansible
 
 Ansible es una herramienta de automatización de TI de código abierto que permite gestionar configuraciones, desplegar aplicaciones y orquestar tareas de manera sencilla y eficiente. Se basa en un enfoque sencillo, sin agentes y utiliza SSH para comunicarse con los nodos gestionados.
