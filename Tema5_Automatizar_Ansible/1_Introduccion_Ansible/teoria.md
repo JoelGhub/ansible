@@ -13,3 +13,25 @@ Ansible es una herramienta de automatización de TI de código abierto que permi
 - **Imperativo:** Se indican los pasos exactos a seguir para llegar al estado deseado.
 
 Ansible utiliza principalmente el modelo declarativo, facilitando la gestión de infraestructuras complejas.
+
+## ¿Cómo funciona Ansible?
+Ansible se basa en una arquitectura simple:
+
+- **Controlador:** Es el equipo desde el que se ejecutan los comandos de Ansible. Aquí se instalan los playbooks y la configuración.
+- **Nodos gestionados:** Son los servidores o dispositivos sobre los que Ansible actúa. No requieren que se instale ningún software adicional, solo acceso SSH y Python.
+
+El controlador se conecta a los nodos gestionados mediante SSH y ejecuta las tareas definidas en los playbooks.
+
+## Ejemplo de flujo de trabajo
+1. El usuario escribe un playbook en YAML.
+2. El controlador ejecuta el playbook.
+3. Ansible se conecta por SSH a los nodos gestionados.
+4. Se aplican los cambios necesarios para alcanzar el estado deseado.
+
+## Diagrama básico de funcionamiento
+
+![Diagrama básico de Ansible](https://raw.githubusercontent.com/ansible/ansible-assets/main/ansible-diagram.png)
+
+> **Figura:** El controlador Ansible se conecta por SSH a los nodos gestionados para aplicar configuraciones.
+
+---
