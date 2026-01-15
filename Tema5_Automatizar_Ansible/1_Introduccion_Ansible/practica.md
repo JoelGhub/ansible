@@ -252,6 +252,8 @@ ansible all -a "ls -la /tmp/ansible-test.txt"
 
 # SOLUCIONES A LOS EJERCICIOS ADICIONALES
 
+**NOTA IMPORTANTE:** En estas soluciones, cuando ejecutamos `ansible-playbook playbook.yml` sin especificar el inventario, es porque ya configuramos el archivo `ansible.cfg` con la línea `inventory = inventory.ini`. Si no tienes este archivo de configuración, debes especificar el inventario así: `ansible-playbook -i inventory.ini playbook.yml`
+
 ## Solución Ejercicio 1: Exploración con setup
 
 ```bash
@@ -320,6 +322,8 @@ EOF
 
 # Ejecutar el playbook
 ansible-playbook gestion-archivos.yml
+# O si no tienes ansible.cfg configurado:
+# ansible-playbook -i inventory.ini gestion-archivos.yml
 ```
 
 ## Solución Ejercicio 3: Instalación y configuración de nginx
@@ -371,6 +375,7 @@ EOF
 
 # Ejecutar el playbook
 ansible-playbook nginx-setup.yml
+# O si no tienes ansible.cfg: ansible-playbook -i inventory.ini nginx-setup.yml
 
 # Verificar que funciona
 ansible all -a "curl -s http://localhost"
@@ -456,6 +461,7 @@ EOF
 
 # Ejecutar el playbook
 ansible-playbook playbook-con-variables.yml
+# O si no tienes ansible.cfg: ansible-playbook -i inventory.ini playbook-con-variables.yml
 
 # Verificar resultados
 ansible all -a "ls -la /opt/mi-aplicacion/"
