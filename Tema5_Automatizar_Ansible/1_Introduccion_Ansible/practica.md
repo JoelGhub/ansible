@@ -245,3 +245,271 @@ ansible all -a "ls -la /tmp/ansible-test.txt"
 ---
 
 ¡Ya tienes tu entorno completo y has ejecutado tus primeros comandos con Ansible!
+
+---
+
+<br><br><br><br><br><br><br><br><br><br>
+
+# SOLUCIONES A LOS EJERCICIOS ADICIONALES
+
+## Solución Ejercicio 1: Exploración con setup
+
+```bash
+# Ejecutar setup en un nodo específico
+ansible ansible-node1 -m setup
+
+# Filtrar información específica
+ansible all -m setup -a "filter=ansible_distribution*"
+ansible all -m setup -a "filter=ansible_memtotal_mb"
+ansible all -m setup -a "filter=ansible_processor*"
+
+# Guardar la información en un archivo para análisis
+ansible all -m setup > facts.json
+```
+
+**Información útil que puedes encontrar:**
+- Sistema operativo y versión
+- Memoria total y disponible
+- Información del procesador
+- Direcciones IP e interfaces de red
+- Espacio en disco
+- Variables de entorno
+
+## Solución Ejercicio 2: Gestión de archivos
+
+```bash
+# Crear un archivo de configuración local
+cat > mi-config.conf << EOF
+# Mi archivo de configuración personalizada
+server_name=mi-servidor
+debug_mode=true
+max_connections=100
+timeout=30
+EOF
+
+# Crear playbook para copiar archivos
+cat > gestion-archivos.yml << EOF
+---
+- name: Gestión de archivos de configuración
+  hosts: all
+  become: true
+  tasks:
+    - name: Crear directorio de configuración
+      file:
+        path: /etc/mi-app
+        state: directory
+        mode: '0755'
+    
+    - name: Copiar archivo de configuración
+      copy:
+        src: mi-config.conf
+        dest: /etc/mi-app/mi-config.conf
+        mode: '0644'
+        backup: yes
+    
+    - name: Crear archivo desde template
+      copy:
+        content: |
+          # Archivo generado por Ansible
+          hostname={{ ansible_hostname }}
+          ip={{ ansible_default_ipv4.address }}
+          fecha={{ ansible_date_time.date }}
+        dest: /tmp/info-sistema.txt
+        mode: '0644'
+EOF
+
+# Ejecutar el playbook
+ansible-playbook gestion-archivos.yml
+```
+
+## Solución Ejercicio 3: Instalación y configuración de nginx
+
+```bash
+# Crear playbook para nginx
+cat > nginx-setup.yml << EOF
+---
+- name: Instalación y configuración de nginx
+  hosts: all
+  become: true
+  tasks:
+    - name: Instalar nginx
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+    
+    - name: Crear página web personalizada
+      copy:
+        content: |
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Servidor {{ ansible_hostname }}</title>
+          </head>
+          <body>
+              <h1>¡Hola desde {{ ansible_hostname }}!</h1>
+              <p>IP: {{ ansible_default_ipv4.address }}</p>
+              <p>Configurado con Ansible</p>
+          </body>
+          </html>
+        dest: /var/www/html/index.html
+        mode: '0644'
+    
+    - name: Iniciar y habilitar nginx
+      systemd:
+        name: nginx
+        state: started
+        enabled: true
+    
+    - name: Verificar que nginx está corriendo
+      service_facts:
+    
+    - name: Mostrar estado del servicio
+      debug:
+        msg: "Nginx está {{ ansible_facts.services['nginx.service'].state }}"
+EOF
+
+# Ejecutar el playbook
+ansible-playbook nginx-setup.yml
+
+# Verificar que funciona
+ansible all -a "curl -s http://localhost"
+```
+
+## Solución Ejercicio 4: Uso de variables
+
+```bash
+# Crear archivo de variables
+cat > variables.yml << EOF
+---
+paquetes_basicos:
+  - htop
+  - curl
+  - wget
+  - vim
+  - git
+
+paquetes_desarrollo:
+  - build-essential
+  - python3-pip
+  - nodejs
+  - npm
+
+usuario_app: "appuser"
+directorio_app: "/opt/mi-aplicacion"
+EOF
+
+# Crear playbook con variables
+cat > playbook-con-variables.yml << EOF
+---
+- name: Playbook usando variables
+  hosts: all
+  become: true
+  vars_files:
+    - variables.yml
+  vars:
+    mensaje_bienvenida: "¡Servidor configurado con Ansible!"
+  
+  tasks:
+    - name: Instalar paquetes básicos
+      apt:
+        name: "{{ paquetes_basicos }}"
+        state: present
+        update_cache: yes
+    
+    - name: Instalar paquetes de desarrollo
+      apt:
+        name: "{{ paquetes_desarrollo }}"
+        state: present
+      when: inventory_hostname == "ansible-node1"
+    
+    - name: Crear usuario de aplicación
+      user:
+        name: "{{ usuario_app }}"
+        shell: /bin/bash
+        create_home: yes
+    
+    - name: Crear directorio de aplicación
+      file:
+        path: "{{ directorio_app }}"
+        state: directory
+        owner: "{{ usuario_app }}"
+        mode: '0755'
+    
+    - name: Crear archivo con mensaje personalizado
+      copy:
+        content: |
+          {{ mensaje_bienvenida }}
+          Configurado el: {{ ansible_date_time.date }}
+          En el servidor: {{ ansible_hostname }}
+        dest: "{{ directorio_app }}/bienvenida.txt"
+        owner: "{{ usuario_app }}"
+        mode: '0644'
+    
+    - name: Mostrar información de variables
+      debug:
+        msg: 
+          - "Paquetes básicos: {{ paquetes_basicos | join(', ') }}"
+          - "Usuario creado: {{ usuario_app }}"
+          - "Directorio: {{ directorio_app }}"
+EOF
+
+# Ejecutar el playbook
+ansible-playbook playbook-con-variables.yml
+
+# Verificar resultados
+ansible all -a "ls -la /opt/mi-aplicacion/"
+ansible all -a "cat /opt/mi-aplicacion/bienvenida.txt"
+```
+
+### Ejemplo avanzado con variables por grupo
+
+```bash
+# Crear inventario con variables por grupo
+cat > inventory-avanzado.ini << EOF
+[webservers]
+ansible-node1 ansible_host=192.168.56.101 ansible_user=node1
+
+[databases]  
+ansible-node2 ansible_host=192.168.56.102 ansible_user=node2
+
+[webservers:vars]
+tipo_servidor=web
+puerto_app=80
+paquetes_especiales=["apache2", "php"]
+
+[databases:vars]
+tipo_servidor=database
+puerto_app=3306
+paquetes_especiales=["mysql-server", "mysql-client"]
+
+[all:vars]
+entorno=desarrollo
+EOF
+
+# Playbook que usa variables por grupo
+cat > playbook-grupos.yml << EOF
+---
+- name: Configuración específica por tipo de servidor
+  hosts: all
+  become: true
+  tasks:
+    - name: Mostrar tipo de servidor
+      debug:
+        msg: "Este es un servidor de tipo: {{ tipo_servidor }}"
+    
+    - name: Instalar paquetes específicos del grupo
+      apt:
+        name: "{{ paquetes_especiales }}"
+        state: present
+        update_cache: yes
+      when: paquetes_especiales is defined
+    
+    - name: Configurar firewall para el puerto específico
+      debug:
+        msg: "Configurando firewall para puerto {{ puerto_app }}"
+EOF
+
+# Usar el inventario avanzado
+ansible-playbook -i inventory-avanzado.ini playbook-grupos.yml
+```
