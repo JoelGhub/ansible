@@ -1,0 +1,430 @@
+# Workflow CI/CD Completo - Ejemplo de Referencia
+# Este es un ejemplo completo que puede servir como template
+
+name: Complete CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '18'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ==========================================
+  # PHASE 1: CODE QUALITY
+  # ==========================================
+  
+  lint:
+    name: Lint & Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run ESLint
+        run: npm run lint
+      
+      - name: Check formatting
+        run: npm run format:check
+
+  # ==========================================
+  # PHASE 2: TESTING
+  # ==========================================
+  
+  test-unit:
+    name: Unit Tests
+    needs: lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [16, 18, 20]
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+      
+      - run: npm ci
+      
+      - name: Run unit tests
+        run: npm run test:unit -- --coverage
+      
+      - name: Upload coverage
+        if: matrix.node-version == '18'
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/lcov.info
+          flags: unittests
+  
+  test-integration:
+    name: Integration Tests
+    needs: lint
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - run: npm ci
+      
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgresql://postgres:testpass@localhost:5432/testdb
+          REDIS_URL: redis://localhost:6379
+        run: npm run test:integration
+
+  # ==========================================
+  # PHASE 3: SECURITY
+  # ==========================================
+  
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      # Dependency scanning
+      - name: Run Snyk
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      
+      # Secret scanning
+      - name: TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+      
+      # SAST
+      - name: CodeQL Analysis
+        uses: github/codeql-action/init@v2
+        with:
+          languages: javascript
+      
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+
+  # ==========================================
+  # PHASE 4: BUILD & PACKAGE
+  # ==========================================
+  
+  build:
+    name: Build Docker Image
+    needs: [test-unit, test-integration, security-scan]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      version: ${{ steps.meta.outputs.version }}
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Log in to Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+      
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.meta.outputs.tags }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ==========================================
+  # PHASE 5: DEPLOY STAGING
+  # ==========================================
+  
+  deploy-staging:
+    name: Deploy to Staging
+    needs: build
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.example.com
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Deploy to staging
+        run: |
+          echo "Deploying image: ${{ needs.build.outputs.image-tag }}"
+          # kubectl set image deployment/app app=${{ needs.build.outputs.image-tag }} -n staging
+          # kubectl rollout status deployment/app -n staging
+      
+      - name: Wait for deployment
+        run: sleep 30
+      
+      - name: Health check
+        run: |
+          for i in {1..10}; do
+            if curl -f https://staging.example.com/health; then
+              echo "✅ Staging is healthy"
+              exit 0
+            fi
+            echo "Attempt $i/10..."
+            sleep 10
+          done
+          exit 1
+      
+      - name: Run smoke tests
+        run: |
+          curl -f https://staging.example.com/api/status
+          echo "✅ Smoke tests passed"
+      
+      - name: Notify deployment
+        uses: 8398a7/action-slack@v3
+        if: always()
+        with:
+          status: ${{ job.status }}
+          text: 'Staging deployment ${{ job.status }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  # ==========================================
+  # PHASE 6: DEPLOY PRODUCTION
+  # ==========================================
+  
+  deploy-production:
+    name: Deploy to Production
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://example.com
+    outputs:
+      previous-version: ${{ steps.backup.outputs.version }}
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Backup current version
+        id: backup
+        run: |
+          # CURRENT=$(kubectl get deployment app -n production -o jsonpath='{.spec.template.spec.containers[0].image}')
+          # echo "version=$CURRENT" >> $GITHUB_OUTPUT
+          echo "version=previous-version" >> $GITHUB_OUTPUT
+      
+      - name: Deploy to production
+        run: |
+          echo "Deploying to production..."
+          # kubectl set image deployment/app app=${{ needs.build.outputs.image-tag }} -n production
+          # kubectl rollout status deployment/app -n production --timeout=5m
+      
+      - name: Post-deployment health checks
+        id: health
+        run: |
+          sleep 30
+          for i in {1..10}; do
+            if curl -f https://example.com/health; then
+              echo "status=healthy" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "status=unhealthy" >> $GITHUB_OUTPUT
+          exit 1
+        continue-on-error: true
+  
+  # ==========================================
+  # PHASE 7: POST-DEPLOYMENT TESTS
+  # ==========================================
+  
+  post-deployment-tests:
+    name: Post-Deployment Tests
+    needs: deploy-production
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Smoke tests
+        run: |
+          curl -f https://example.com/health
+          curl -f https://example.com/api/status
+      
+      - name: E2E critical paths
+        run: |
+          npx playwright install chromium --with-deps
+          npx playwright test --grep "@critical"
+      
+      - name: Performance test
+        run: |
+          docker run --rm -i grafana/k6 run - < performance-test.js
+
+  # ==========================================
+  # PHASE 8: ROLLBACK IF NEEDED
+  # ==========================================
+  
+  rollback:
+    name: Rollback on Failure
+    needs: [deploy-production, post-deployment-tests]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Rollback deployment
+        run: |
+          echo "❌ Deployment or tests failed, rolling back..."
+          # kubectl set image deployment/app app=${{ needs.deploy-production.outputs.previous-version }} -n production
+          # kubectl rollout status deployment/app -n production
+      
+      - name: Verify rollback
+        run: |
+          sleep 30
+          curl -f https://example.com/health
+      
+      - name: Alert team
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          text: |
+            🚨 Production deployment failed and was rolled back!
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  # ==========================================
+  # PHASE 9: MONITORING
+  # ==========================================
+  
+  post-deployment-monitoring:
+    name: Monitor Deployment
+    needs: [deploy-production, post-deployment-tests]
+    if: success() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Monitor metrics
+        run: |
+          echo "Monitoring deployment metrics for 5 minutes..."
+          sleep 300
+          # Check Prometheus/Grafana for anomalies
+      
+      - name: Generate deployment report
+        run: |
+          cat << EOF > deployment-report.md
+          # Deployment Report
+          
+          **Date:** $(date)
+          **Commit:** ${{ github.sha }}
+          **Author:** ${{ github.actor }}
+          **Version:** ${{ needs.build.outputs.version }}
+          **Status:** ✅ Success
+          
+          ## Metrics
+          - Pipeline Duration: ${{ github.run_duration }} min
+          - Tests Passed: All
+          - Health Checks: Passed
+          
+          ## Links
+          - [Production](https://example.com)
+          - [Logs](https://logs.example.com)
+          - [Metrics](https://metrics.example.com)
+          EOF
+      
+      - name: Upload report
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-report
+          path: deployment-report.md
+      
+      - name: Success notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: success
+          text: |
+            ✅ Production deployment successful!
+            Version: ${{ needs.build.outputs.version }}
+            Commit: ${{ github.sha }}
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
